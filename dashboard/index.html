@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GKE scale-to-zero · live</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-queue: #2a78d6;
+    --series-pods: #eb6834;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-queue: #3987e5;
+      --series-pods: #d95926;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-queue: #3987e5;
+    --series-pods: #d95926;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 20px 48px; }
+
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .meta { color: var(--text-muted); font-size: 12.5px; }
+  .meta code { font-family: inherit; color: var(--text-secondary); }
+  .spacer { flex: 1; }
+  button {
+    font: inherit; font-size: 13px; color: var(--text-secondary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover { color: var(--text-primary); border-color: var(--axis); }
+  button.primary { color: var(--text-primary); font-weight: 560; }
+  button[aria-pressed="true"] { border-color: var(--axis); color: var(--text-primary); font-weight: 560; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+
+  /* ---- banner ---- */
+  #banner { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; padding: 18px 22px; }
+  #banner .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--state-color); flex: none; }
+  #banner .dot.pulse { animation: pulse 1.4s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--state-color); } 70% { box-shadow: 0 0 0 12px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  #banner .label { font-size: 24px; font-weight: 680; letter-spacing: -0.015em; }
+  #banner .sub { color: var(--text-secondary); font-size: 13.5px; }
+
+  /* ---- tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+  .tile .k { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tile .v { font-size: 34px; font-weight: 650; letter-spacing: -0.02em; margin-top: 4px; line-height: 1.1; }
+  .tile .n { color: var(--text-secondary); font-size: 12.5px; margin-top: 2px; }
+
+  /* ---- charts ---- */
+  .charts { margin-bottom: 14px; }
+  .chartrow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 2px; }
+  .chartrow h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .chartrow .hint { color: var(--text-muted); font-size: 12px; }
+  .chart + .chartrow { margin-top: 18px; }
+  svg { display: block; width: 100%; height: auto; touch-action: none; }
+  .filters { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .filters .lbl { color: var(--text-muted); font-size: 12px; margin-right: 2px; }
+  #tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 24px rgba(0,0,0,.18); z-index: 50;
+  }
+  #tip .t { color: var(--text-muted); font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+  #tip .r { display: flex; align-items: center; gap: 7px; }
+  #tip .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  #tip .nm { color: var(--text-secondary); }
+  #tip .vl { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---- bottom ---- */
+  .bottom { display: grid; grid-template-columns: 1.35fr 1fr; gap: 12px; }
+  h2.sec { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+  #pods { display: flex; flex-wrap: wrap; gap: 8px; min-height: 40px; align-content: flex-start; }
+  .pod {
+    display: flex; align-items: center; gap: 7px; padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pod .ic { font-size: 11px; line-height: 1; }
+  .pod .ph { color: var(--text-muted); font-size: 11.5px; }
+  .empty { color: var(--text-muted); font-size: 13px; font-style: italic; }
+  #events { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+  #events li { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--grid); font-size: 12.5px; }
+  #events li:last-child { border-bottom: 0; }
+  #events time { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+  #events .tx { color: var(--text-secondary); }
+
+  /* ---- table view ---- */
+  #tablewrap { margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; }
+  [hidden] { display: none !important; }
+  .err { color: var(--critical); font-size: 12.5px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>GKE scale-to-zero</h1>
+    <span class="meta" id="meta">connecting…</span>
+    <span class="spacer"></span>
+    <button id="theme" title="Toggle light / dark">◐ Theme</button>
+  </header>
+
+  <div class="card" id="banner">
+    <span class="dot" id="state-dot"></span>
+    <div>
+      <div class="label" id="state-label">Connecting</div>
+      <div class="sub" id="state-sub">Waiting for the first poll…</div>
+    </div>
+    <span class="spacer"></span>
+    <button class="primary" data-pub="200">Publish 200 jobs</button>
+    <button data-pub="1000">1 000</button>
+    <button data-pub="5000">5 000</button>
+  </div>
+
+  <div class="tiles">
+    <div class="card tile"><div class="k">Backlog</div><div class="v" id="t-queue">—</div><div class="n" id="t-queue-n">undelivered messages</div></div>
+    <div class="card tile"><div class="k">Worker replicas</div><div class="v" id="t-reps">—</div><div class="n" id="t-reps-n">ready / desired</div></div>
+    <div class="card tile"><div class="k">Cluster nodes</div><div class="v" id="t-nodes">—</div><div class="n" id="t-nodes-n">Autopilot provisioned</div></div>
+    <div class="card tile"><div class="k">HPA</div><div class="v" id="t-hpa">—</div><div class="n" id="t-hpa-n">min / max replicas</div></div>
+  </div>
+
+  <div class="card charts">
+    <div class="filters">
+      <span class="lbl">Window</span>
+      <button data-win="300">5 min</button>
+      <button data-win="600" aria-pressed="true">10 min</button>
+      <button data-win="1800">30 min</button>
+      <span class="spacer"></span>
+      <button id="tabletoggle" aria-pressed="false">Table view</button>
+    </div>
+
+    <div class="chartrow">
+      <h2>Pub/Sub backlog</h2>
+      <span class="hint">undelivered messages on <code id="subname">…</code> — the signal the HPA reads</span>
+    </div>
+    <svg id="c-queue" class="chart" viewBox="0 0 1000 190"></svg>
+
+    <div class="chartrow">
+      <h2>async-worker replicas</h2>
+      <span class="hint">ready Pods, against the HPA's desired count</span>
+    </div>
+    <svg id="c-pods" class="chart" viewBox="0 0 1000 190"></svg>
+
+    <div id="tablewrap" hidden>
+      <table><thead><tr><th>Time</th><th>Backlog</th><th>Desired</th><th>Replicas</th><th>Ready</th><th>Nodes</th></tr></thead>
+      <tbody id="tbody"></tbody></table>
+    </div>
+    <div class="err" id="errors" hidden></div>
+  </div>
+
+  <div class="bottom">
+    <div class="card">
+      <h2 class="sec">Pods</h2>
+      <div id="pods"><span class="empty">no Pods — the Deployment is at zero</span></div>
+    </div>
+    <div class="card">
+      <h2 class="sec">Autoscaler events</h2>
+      <ul id="events"></ul>
+    </div>
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const PAD = { l: 52, r: 58, t: 14, b: 24 };
+const W = 1000, H = 190;
+const $ = (id) => document.getElementById(id);
+
+let windowSec = 600;
+let latest = null;
+let hoverT = null;
+
+/* ---------- theme ---------- */
+const root = document.documentElement;
+$("theme").onclick = () => {
+  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+  if (latest) render(latest);
+};
+
+/* ---------- filters ---------- */
+document.querySelectorAll("[data-win]").forEach((b) => {
+  b.onclick = () => {
+    windowSec = +b.dataset.win;
+    document.querySelectorAll("[data-win]").forEach((o) =>
+      o.setAttribute("aria-pressed", String(o === b)));
+    if (latest) render(latest);
+  };
+});
+$("tabletoggle").onclick = () => {
+  const on = $("tabletoggle").getAttribute("aria-pressed") !== "true";
+  $("tabletoggle").setAttribute("aria-pressed", String(on));
+  $("tablewrap").hidden = !on;
+  if (latest) render(latest);
+};
+
+/* ---------- publish ---------- */
+document.querySelectorAll("[data-pub]").forEach((b) => {
+  b.onclick = async () => {
+    const all = document.querySelectorAll("[data-pub]");
+    all.forEach((x) => (x.disabled = true));
+    const was = b.textContent;
+    b.textContent = "publishing…";
+    try {
+      await fetch(`/api/publish?count=${b.dataset.pub}`, { method: "POST" });
+    } finally {
+      b.textContent = was;
+      all.forEach((x) => (x.disabled = false));
+    }
+  };
+});
+
+/* ---------- helpers ---------- */
+const css = (n) => getComputedStyle(document.body).getPropertyValue(n).trim();
+const clock = (t) => new Date(t * 1000).toTimeString().slice(0, 8);
+const el = (tag, attrs, text) => {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+};
+function niceMax(v) {
+  if (v <= 4) return 4;
+  const pow = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]) {
+    if (v <= m * pow) return m * pow;
+  }
+  return 10 * pow;
+}
+
+const STATES = {
+  zero:           { label: "Scaled to zero",  color: "--good",    icon: "●", pulse: false },
+  waking:         { label: "Waking from zero", color: "--warning", icon: "▲", pulse: true  },
+  "scaling-up":   { label: "Scaling up",      color: "--warning", icon: "▲", pulse: true  },
+  processing:     { label: "Processing",      color: "--series-queue", icon: "⟳", pulse: true },
+  "scaling-down": { label: "Scaling down",    color: "--serious", icon: "▼", pulse: true  },
+  unknown:        { label: "Connecting",      color: "--text-muted", icon: "·", pulse: false },
+};
+const POD_STATUS = {
+  Running:     { color: "--good",     icon: "●" },
+  Pending:     { color: "--warning",  icon: "◐" },
+  ContainerCreating: { color: "--warning", icon: "◐" },
+  PodInitializing:   { color: "--warning", icon: "◐" },
+  Terminating: { color: "--serious",  icon: "◍" },
+  Failed:      { color: "--critical", icon: "✕" },
+  CrashLoopBackOff: { color: "--critical", icon: "✕" },
+};
+
+/* ---------- chart ---------- */
+function drawChart(svg, opts) {
+  const { points, color, label, unit, threshold, ghost } = opts;
+  svg.replaceChildren();
+  const t1 = Date.now() / 1000;
+  const t0 = t1 - windowSec;
+  const inWin = points.filter((p) => p.t >= t0 - 5 && p.v != null);
+
+  const vals = inWin.map((p) => p.v);
+  if (ghost) vals.push(...ghost.filter((p) => p.t >= t0 - 5).map((p) => p.v));
+  if (threshold) vals.push(threshold.value);
+  const yMax = niceMax(Math.max(1, ...vals));
+
+  const x = (t) => PAD.l + ((t - t0) / windowSec) * (W - PAD.l - PAD.r);
+  const y = (v) => PAD.t + (1 - v / yMax) * (H - PAD.t - PAD.b);
+
+  const gridC = css("--grid"), axisC = css("--axis"), mutedC = css("--text-muted");
+
+  // y gridlines
+  for (let i = 0; i <= 4; i++) {
+    const v = (yMax / 4) * i;
+    svg.append(el("line", { x1: PAD.l, x2: W - PAD.r, y1: y(v), y2: y(v),
+      stroke: i === 0 ? axisC : gridC, "stroke-width": 1 }));
+    svg.append(el("text", { x: PAD.l - 8, y: y(v) + 4, fill: mutedC, "font-size": 11,
+      "text-anchor": "end", "font-family": "system-ui, sans-serif" },
+      v >= 1000 ? (v / 1000) + "k" : String(v)));
+  }
+  // x ticks
+  const steps = 5;
+  for (let i = 0; i <= steps; i++) {
+    const t = t0 + (windowSec / steps) * i;
+    svg.append(el("text", { x: x(t), y: H - 6, fill: mutedC, "font-size": 11,
+      "text-anchor": i === 0 ? "start" : i === steps ? "end" : "middle",
+      "font-family": "system-ui, sans-serif" }, clock(t)));
+  }
+
+  // threshold / reference line, in muted ink (an annotation, not a series)
+  if (threshold) {
+    svg.append(el("line", { x1: PAD.l, x2: W - PAD.r, y1: y(threshold.value),
+      y2: y(threshold.value), stroke: mutedC, "stroke-width": 1.5,
+      "stroke-dasharray": "5 4", opacity: 0.85 }));
+    svg.append(el("text", { x: W - PAD.r + 6, y: y(threshold.value) + 4, fill: mutedC,
+      "font-size": 11, "font-family": "system-ui, sans-serif" }, threshold.label));
+  }
+
+  // ghost (desired) — a step line in muted ink, direct-labelled
+  if (ghost && ghost.length) {
+    const g = ghost.filter((p) => p.t >= t0 - 5);
+    if (g.length) {
+      let d = `M ${x(g[0].t)} ${y(g[0].v)}`;
+      for (let i = 1; i < g.length; i++) d += ` L ${x(g[i].t)} ${y(g[i - 1].v)} L ${x(g[i].t)} ${y(g[i].v)}`;
+      d += ` L ${x(t1)} ${y(g[g.length - 1].v)}`;
+      svg.append(el("path", { d, fill: "none", stroke: mutedC, "stroke-width": 1.5,
+        "stroke-dasharray": "5 4", opacity: 0.9 }));
+      svg.append(el("text", { x: W - PAD.r + 6, y: y(g[g.length - 1].v) + 4, fill: mutedC,
+        "font-size": 11, "font-family": "system-ui, sans-serif" }, "desired"));
+    }
+  }
+
+  if (inWin.length) {
+    const step = opts.step;
+    let line = `M ${x(inWin[0].t)} ${y(inWin[0].v)}`;
+    for (let i = 1; i < inWin.length; i++) {
+      if (step) line += ` L ${x(inWin[i].t)} ${y(inWin[i - 1].v)}`;
+      line += ` L ${x(inWin[i].t)} ${y(inWin[i].v)}`;
+    }
+    const last = inWin[inWin.length - 1];
+    line += ` L ${x(t1)} ${y(last.v)}`;
+
+    svg.append(el("path", { d: `${line} L ${x(t1)} ${y(0)} L ${x(inWin[0].t)} ${y(0)} Z`,
+      fill: color, opacity: 0.13, stroke: "none" }));
+    svg.append(el("path", { d: line, fill: "none", stroke: color, "stroke-width": 2,
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    // 4px rounded data-end at the live edge
+    svg.append(el("rect", { x: x(t1) - 4, y: Math.min(y(last.v), y(0) - 4), width: 4,
+      height: Math.max(4, Math.abs(y(0) - y(last.v))), rx: 2, fill: color }));
+    svg.append(el("text", { x: W - PAD.r + 6, y: y(last.v) - 8, fill: css("--text-primary"),
+      "font-size": 12.5, "font-weight": 600, "font-family": "system-ui, sans-serif" },
+      `${last.v}${unit || ""}`));
+  }
+
+  // hover crosshair
+  if (hoverT != null && hoverT >= t0 && hoverT <= t1) {
+    svg.append(el("line", { x1: x(hoverT), x2: x(hoverT), y1: PAD.t, y2: H - PAD.b,
+      stroke: axisC, "stroke-width": 1 }));
+    const near = nearest(inWin, hoverT);
+    if (near) {
+      svg.append(el("circle", { cx: x(hoverT), cy: y(near.v), r: 5, fill: color,
+        stroke: css("--surface-1"), "stroke-width": 2 }));
+    }
+  }
+
+  svg.dataset.t0 = t0;
+  svg.dataset.t1 = t1;
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", label);
+}
+
+function nearest(points, t) {
+  let best = null, bd = Infinity;
+  for (const p of points) {
+    const d = Math.abs(p.t - t);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return bd < windowSec / 12 ? best : null;
+}
+
+/* ---------- hover ---------- */
+function bindHover(svg) {
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    if (px < PAD.l || px > W - PAD.r) return leave();
+    const t0 = +svg.dataset.t0, t1 = +svg.dataset.t1;
+    hoverT = t0 + ((px - PAD.l) / (W - PAD.l - PAD.r)) * (t1 - t0);
+    showTip(ev.clientX, ev.clientY);
+    if (latest) render(latest);
+  };
+  const leave = () => {
+    hoverT = null;
+    $("tip").style.opacity = 0;
+    if (latest) render(latest);
+  };
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerleave", leave);
+}
+
+function showTip(cx, cy) {
+  if (!latest) return;
+  const h = latest.history;
+  const q = nearest(h.filter((p) => p.queue != null).map((p) => ({ t: p.t, v: p.queue })), hoverT);
+  const r = nearest(h.map((p) => ({ t: p.t, v: p.replicas })), hoverT);
+  const d = nearest(h.map((p) => ({ t: p.t, v: p.desired })), hoverT);
+  const rows = [
+    ["--series-queue", "Backlog", q ? q.v.toLocaleString() : "—"],
+    ["--series-pods", "Replicas", r ? r.v : "—"],
+    [null, "Desired", d ? d.v : "—"],
+  ];
+  const tip = $("tip");
+  tip.innerHTML = `<div class="t">${clock(hoverT)}</div>` + rows.map(([c, n, v]) =>
+    `<div class="r"><span class="sw" style="background:${c ? css(c) : "transparent"};${
+      c ? "" : "border:1.5px dashed " + css("--text-muted")}"></span>` +
+    `<span class="nm">${n}</span><span class="vl">${v}</span></div>`).join("");
+  tip.style.opacity = 1;
+  const w = tip.offsetWidth || 170;
+  tip.style.left = Math.min(cx + 16, window.innerWidth - w - 12) + "px";
+  tip.style.top = (cy - 10) + "px";
+}
+
+/* ---------- render ---------- */
+function render(data) {
+  const { state: s, history: h, config: c, events: ev } = data;
+
+  $("meta").innerHTML =
+    `cluster <code>${c.cluster}</code> · <code>${c.location}</code> · ` +
+    `subscription <code>${c.subscription}</code> · deployment <code>${c.deployment}</code>`;
+  $("subname").textContent = c.subscription;
+
+  // banner
+  const st = STATES[s.phase] || STATES.unknown;
+  $("banner").style.setProperty("--state-color", css(st.color));
+  $("state-dot").className = "dot" + (st.pulse ? " pulse" : "");
+  $("state-label").textContent = `${st.icon}  ${st.label}`;
+  $("state-label").style.color = css(st.color);
+  const reps = s.deployment.replicas ?? 0;
+  const zc = s.hpa.scaledToZero;
+  $("state-sub").textContent =
+    `${reps} replica${reps === 1 ? "" : "s"} · ` +
+    `${s.queue == null ? "—" : s.queue.toLocaleString()} message${s.queue === 1 ? "" : "s"} waiting · ` +
+    `HPA condition ScaledToZero = ${zc === undefined ? "—" : zc ? "True" : "False"}` +
+    (s.queue_age != null ? ` · metric sampled ${s.queue_age}s ago` : "");
+
+  // tiles
+  $("t-queue").textContent = s.queue == null ? "—" : s.queue.toLocaleString();
+  $("t-queue-n").textContent = s.queue_age == null
+    ? "undelivered messages" : `undelivered · ${s.queue_age}s old`;
+  $("t-reps").textContent = `${s.deployment.ready ?? 0} / ${s.hpa.desiredReplicas ?? 0}`;
+  $("t-reps-n").textContent = `ready / desired · ${reps} scheduled`;
+  $("t-nodes").textContent = s.nodes.total ?? "—";
+  $("t-hpa").textContent = `${s.hpa.minReplicas ?? "—"} – ${s.hpa.maxReplicas ?? "—"}`;
+  $("t-hpa-n").textContent = s.hpa.target
+    ? `min–max replicas · target ${s.hpa.target} msg/Pod` : "min – max replicas";
+
+  // charts
+  drawChart($("c-queue"), {
+    points: h.filter((p) => p.queue != null).map((p) => ({ t: p.t, v: p.queue })),
+    color: css("--series-queue"),
+    label: "Pub/Sub undelivered messages over time",
+    step: true,
+    threshold: s.hpa.target ? { value: +s.hpa.target, label: `${s.hpa.target}/Pod` } : null,
+  });
+  drawChart($("c-pods"), {
+    points: h.map((p) => ({ t: p.t, v: p.ready })),
+    ghost: h.map((p) => ({ t: p.t, v: p.desired })),
+    color: css("--series-pods"),
+    label: "Ready worker replicas over time",
+    step: true,
+  });
+
+  // pods
+  const pods = $("pods");
+  pods.replaceChildren();
+  if (!s.pods.length) {
+    const e = document.createElement("span");
+    e.className = "empty";
+    e.textContent = "no Pods — the Deployment is at zero replicas";
+    pods.append(e);
+  } else {
+    for (const p of s.pods) {
+      const cfg = POD_STATUS[p.phase] || { color: "--text-muted", icon: "·" };
+      const d = document.createElement("div");
+      d.className = "pod";
+      d.innerHTML = `<span class="ic" style="color:${css(cfg.color)}">${cfg.icon}</span>` +
+        `<span>${p.name}</span><span class="ph">${p.phase}</span>`;
+      d.title = p.fullName + (p.node ? ` on ${p.node}` : "");
+      pods.append(d);
+    }
+  }
+
+  // events
+  const list = $("events");
+  list.replaceChildren();
+  for (const e of [...ev].reverse()) {
+    const li = document.createElement("li");
+    li.innerHTML = `<time>${clock(e.t)}</time><span class="tx">${e.text}</span>`;
+    list.append(li);
+  }
+
+  // table view
+  if (!$("tablewrap").hidden) {
+    const rows = h.slice(-60).reverse();
+    $("tbody").innerHTML = rows.map((p) =>
+      `<tr><td>${clock(p.t)}</td><td>${p.queue ?? "—"}</td><td>${p.desired}</td>` +
+      `<td>${p.replicas}</td><td>${p.ready}</td><td>${p.nodes}</td></tr>`).join("");
+  }
+
+  $("errors").hidden = !s.errors.length;
+  $("errors").textContent = s.errors.join(" · ");
+}
+
+/* ---------- poll ---------- */
+async function tick() {
+  try {
+    const r = await fetch("/api/state");
+    latest = await r.json();
+    render(latest);
+  } catch (e) {
+    $("state-sub").textContent = "dashboard server unreachable — " + e;
+  }
+}
+[$("c-queue"), $("c-pods")].forEach(bindHover);
+tick();
+setInterval(tick, 2000);
+window.addEventListener("resize", () => latest && render(latest));
+</script>
+</body>
+</html>

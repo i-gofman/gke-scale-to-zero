@@ -1,0 +1,16 @@
+# GKE 1.37+ reads this metric straight from Cloud Monitoring in the control
+# plane -- no custom metrics adapter and no KEDA in the cluster.
+apiVersion: autoscaling.gke.io/v1beta1
+kind: AutoscalingMetric
+metadata:
+  name: ${METRIC_CR}
+  namespace: ${NAMESPACE}
+spec:
+  metrics:
+  - promql:
+      name: ${METRIC_NAME}
+      query: >
+          {
+            "pubsub.googleapis.com/subscription/num_undelivered_messages",
+            subscription_id="${SUBSCRIPTION}"
+          }

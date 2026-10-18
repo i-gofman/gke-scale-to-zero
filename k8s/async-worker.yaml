@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${DEPLOYMENT}
+  namespace: ${NAMESPACE}
+spec:
+  # Must start at >= 1. The HPA only takes ownership of a workload it has seen
+  # running: starting at 0 leaves it stuck on
+  #   ScalingActive=False (ScalingDisabled) / ScaledToZero=False (NotScaledToZero)
+  # and it will never wake the Deployment. The HPA scales this to 0 within ~a
+  # minute of the first poll, and owns the count from then on.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${DEPLOYMENT}
+  template:
+    metadata:
+      labels:
+        app: ${DEPLOYMENT}
+    spec:
+      serviceAccountName: ${KSA}
+      # Long enough for a worker to finish the message it is holding.
+      terminationGracePeriodSeconds: 45
+      containers:
+      - name: worker
+        image: ${IMAGE}
+        env:
+        - name: PROJECT_ID
+          value: "${PROJECT_ID}"
+        - name: SUBSCRIPTION
+          value: "${SUBSCRIPTION}"
+        - name: WORK_SECONDS
+          value: "${WORK_SECONDS}"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 512Mi
