@@ -1,6 +1,9 @@
 SHELL := /bin/bash
 COUNT ?= 200
 PORT  ?= 8080
+# Loopback by default. Override only on a network you trust -- the dashboard
+# has no authentication and its publish button spends money.
+HOST  ?= 127.0.0.1
 
 .PHONY: help setup deploy dashboard publish drain status watch logs cleanup
 
@@ -24,7 +27,7 @@ deploy:
 	@scripts/deploy.sh
 
 dashboard:
-	@source scripts/config.sh && PORT=$(PORT) python3 dashboard/server.py
+	@source scripts/config.sh && PORT=$(PORT) HOST=$(HOST) python3 dashboard/server.py
 
 publish:
 	@source scripts/config.sh && python3 scripts/publish.py $(COUNT)

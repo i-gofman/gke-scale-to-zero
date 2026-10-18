@@ -382,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
+    # Loopback by default: /api/publish is unauthenticated and spends real money.
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     ap.add_argument("--project", default=os.environ.get("PROJECT_ID"))
     ap.add_argument("--location", default=os.environ.get("LOCATION", "us-central1"))
     ap.add_argument("--cluster", default=os.environ.get("CLUSTER_NAME", "scale-to-zero"))
@@ -401,8 +403,13 @@ def main():
         cfg["context"] = f"gke_{args.project}_{args.location}_{args.cluster}"
 
     threading.Thread(target=poll_loop, daemon=True).start()
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"dashboard ready on http://localhost:{args.port}", flush=True)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"WARNING: listening on {args.host}. The dashboard has no "
+              "authentication and anyone who can reach it can publish messages "
+              "to your topic. Do not expose it to an untrusted network.",
+              flush=True)
     server.serve_forever()
 
 

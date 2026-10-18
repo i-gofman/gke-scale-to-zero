@@ -1,2 +1,86 @@
+# ---------------------------------------------------------------------------
+# Credentials — never commit any of these
+# ---------------------------------------------------------------------------
+*service-account*.json
+*service_account*.json
+*credentials*.json
+application_default_credentials.json
+*-key.json
+*_key.json
+sa-*.json
+client_secret*.json
+*.pem
+*.p12
+*.pfx
+*.key
+!**/*.public.key
+
+# Local environment overrides (PROJECT_ID, cluster names, etc.)
+.env
+.env.*
+!.env.example
+*.local.sh
+config.local.sh
+
+# Kubernetes contexts and cluster credentials
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+
+# ---------------------------------------------------------------------------
+# Generated / rendered output
+# ---------------------------------------------------------------------------
+# scripts/render.py output, if anyone pipes it to a file instead of kubectl
+rendered/
+*.rendered.yaml
+*.generated.yaml
+
+# Terraform, if this ever grows an infra/ directory
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Logs and scratch
+# ---------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+scratch/
+*.bak
+*.orig
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini

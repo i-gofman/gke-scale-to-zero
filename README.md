@@ -3,6 +3,9 @@
 A self-contained, visual demo of
 [Scale GKE workloads to and from zero using HPA](https://docs.cloud.google.com/kubernetes-engine/docs/tutorials/scale-to-from-zero-hpa).
 
+> Demo code, not production code, and not an official Google product. It creates
+> billable resources — read [Security and cost](#security-and-cost) first.
+
 A worker Deployment sits at **0 replicas** on an Autopilot cluster — no Pods, and
 once Autopilot reclaims the nodes, no nodes either. Publish a batch of jobs to a
 Pub/Sub topic and GKE's HPA wakes the Deployment straight off zero, scales it out
@@ -115,9 +118,33 @@ is 300 s, which is the right production value but makes the return to zero too s
 to watch. `WORK_SECONDS` (default 5) is how long a worker pretends each message
 takes — raise it to keep Pods alive longer, lower it to drain faster.
 
-## Cost
+## Security and cost
 
-Autopilot bills for Pod resource requests, so at zero replicas the workload costs
-nothing; you pay the Autopilot cluster fee and whatever nodes have not yet been
-reclaimed. `make cleanup` removes the cluster, topic, subscription and IAM binding.
-The Artifact Registry repo is left in place — the command to delete it is printed.
+**The dashboard has no authentication.** Anyone who can reach it can publish
+messages to your topic and read your cluster state. It binds to `127.0.0.1` for
+that reason. Only widen that if you trust the network, and never put it on a
+public address:
+
+```bash
+make dashboard HOST=0.0.0.0   # prints a warning; use a tunnel instead if you can
+```
+
+**Credentials are never stored by this repo.** Everything authenticates through
+your own `gcloud` login: the scripts shell out to `gcloud auth print-access-token`
+for the Pub/Sub and Monitoring REST calls, and the worker Pods use Workload
+Identity Federation, so there is no service-account key to download or leak. No
+project ID, project number or account name is committed anywhere — `scripts/config.sh`
+reads `PROJECT_ID` from your active gcloud config, and every manifest is templated.
+
+**It costs money while it runs.** An Autopilot cluster carries a fee even at zero
+replicas, nodes linger for ~10 minutes after the last Pod, and the publish buttons
+create real Pub/Sub traffic — `maxReplicas: 100` at 250m CPU each is ~25 vCPU of
+nodes at full stretch. At zero replicas the workload itself costs nothing, which is
+the whole point of the demo. Tear it all down with:
+
+```bash
+make cleanup
+```
+
+That deletes the cluster, topic, subscription and IAM binding. The Artifact Registry
+repo is left in place — the command to delete it is printed.
