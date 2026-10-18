@@ -15,10 +15,10 @@ A live dashboard shows the whole cycle: backlog, replicas, node count, the Pods
 appearing and disappearing, and the HPA's own `ScaledToZero` condition.
 
 ```
-┌─ Pub/Sub ──────────┐     ┌─ Cloud Monitoring ─┐     ┌─ GKE control plane ────-──┐
+┌─ Pub/Sub ──────────┐     ┌─ Cloud Monitoring ─┐     ┌─ GKE control plane ───────┐
 │ my-worker-topic    │────▶│ num_undelivered_   │────▶│ AutoscalingMetric (PromQL)│
 │ my-worker-subscr.  │     │ messages           │     │   └─▶ HPA  min=0 max=100  │
-└────────────────────┘     └────────────────────┘     └───────────┬──────────-────┘
+└────────────────────┘     └────────────────────┘     └───────────┬───────────────┘
           ▲                                                       │ scales
           │ pulls + acks                                          ▼
           └──────────────────────────────  Deployment/async-worker (0…10 Pods)
