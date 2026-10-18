@@ -21,7 +21,7 @@ appearing and disappearing, and the HPA's own `ScaledToZero` condition.
 └────────────────────┘     └────────────────────┘     └───────────┬───────────────┘
           ▲                                                       │ scales
           │ pulls + acks                                          ▼
-          └──────────────────────────────  Deployment/async-worker (0…10 Pods)
+          └──────────────────────────────  Deployment/async-worker (0…100 Pods)
 ```
 
 ## What makes this version 1.37+
