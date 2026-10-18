@@ -25,7 +25,7 @@ def access_token():
         capture_output=True, text=True, check=True,
     )
     _token["value"] = out.stdout.strip()
-    _token["expires"] = time.time() + 2700  # tokens last an hour; refresh early
+    _token["expires"] = time.time() + 1500
     return _token["value"]
 
 
@@ -43,19 +43,25 @@ def publish(project, topic, count, prefix="job"):
             for i in range(chunk)
         ]
         body = json.dumps({"messages": messages}).encode()
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Authorization": f"Bearer {access_token()}",
-                "Content-Type": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                resp.read()
-        except urllib.error.HTTPError as exc:
-            sys.exit(f"publish failed ({exc.code}): {exc.read().decode()[:400]}")
+        for attempt in (0, 1):
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Authorization": f"Bearer {access_token()}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    resp.read()
+                break
+            except urllib.error.HTTPError as exc:
+                # Token lifetime is not ours to predict; refresh once on 401.
+                if exc.code == 401 and attempt == 0:
+                    _token["value"] = None
+                    continue
+                sys.exit(f"publish failed ({exc.code}): {exc.read().decode()[:400]}")
         sent += chunk
     return sent
 

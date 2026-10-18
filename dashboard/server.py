@@ -35,6 +35,7 @@ state = {
     "ts": 0,
     "queue": None,
     "queue_age": None,
+    "queue_stamp": None,
     "hpa": {},
     "deployment": {},
     "pods": [],
@@ -75,8 +76,27 @@ def access_token():
         capture_output=True, text=True, check=True,
     )
     _token["value"] = out.stdout.strip()
-    _token["expires"] = time.time() + 2700
+    _token["expires"] = time.time() + 1500
     return _token["value"]
+
+
+def monitoring_get(url):
+    """GET with one forced token refresh on 401.
+
+    Token lifetime is not ours to predict -- workstation and impersonated
+    credentials expire well inside an hour -- so never trust the cache alone.
+    """
+    for attempt in (0, 1):
+        req = urllib.request.Request(
+            url, headers={"Authorization": f"Bearer {access_token()}"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401 and attempt == 0:
+                _token["value"] = None
+                continue
+            raise
 
 
 # --------------------------------------------------------------------------
@@ -88,7 +108,7 @@ def fetch_queue_depth():
 
     This is the same series GKE's control plane reads for the AutoscalingMetric,
     so the lag you see here (Pub/Sub exports roughly once a minute) is the lag
-    the autoscaler sees. Returns (value, seconds_since_sample).
+    the autoscaler sees. Returns (value, sample_timestamp).
     """
     now = time.time()
     params = {
@@ -105,11 +125,7 @@ def fetch_queue_depth():
         f"https://monitoring.googleapis.com/v3/projects/{cfg['project']}/timeSeries"
         f"?{urllib.parse.urlencode(params)}"
     )
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token()}"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        body = json.load(resp)
-
-    series = body.get("timeSeries") or []
+    series = monitoring_get(url).get("timeSeries") or []
     if not series:
         return None, None
     points = series[0].get("points") or []
@@ -120,8 +136,7 @@ def fetch_queue_depth():
                                           newest["value"].get("doubleValue", 0))))
     # RFC3339 UTC, with or without fractional seconds.
     end = newest["interval"]["endTime"].rstrip("Z").split(".")[0]
-    stamp = calendar.timegm(time.strptime(end, "%Y-%m-%dT%H:%M:%S"))
-    return value, max(0, int(now - stamp))
+    return value, calendar.timegm(time.strptime(end, "%Y-%m-%dT%H:%M:%S"))
 
 
 def fetch_hpa():
@@ -197,12 +212,18 @@ def fetch_nodes():
     return {"total": len(names), "names": names}
 
 
-def classify(queue, hpa, deployment, pods):
+STALE_AFTER = 180
+
+
+def classify(queue, queue_age, hpa, deployment, pods):
     current = deployment["replicas"]
     desired = hpa.get("desiredReplicas", current)
     live = [p for p in pods if p["phase"] != "Terminating"]
     if current == 0 and not live:
-        return "waking" if (queue or 0) > 0 else "zero"
+        # Only claim "waking" on a backlog we can still vouch for. A stale
+        # sample must never contradict the HPA's own ScaledToZero condition.
+        fresh = queue_age is not None and queue_age <= STALE_AFTER
+        return "waking" if fresh and (queue or 0) > 0 else "zero"
     if desired > current or any(p["phase"] != "Running" for p in live):
         return "scaling-up"
     if desired < current or any(p["phase"] == "Terminating" for p in pods):
@@ -238,7 +259,7 @@ def collect_once(pool):
         prev_zero = state.get("hpa", {}).get("scaledToZero")
 
         if results["queue"] is not None:
-            state["queue"], state["queue_age"] = results["queue"]
+            state["queue"], state["queue_stamp"] = results["queue"]
         for key in ("hpa", "deployment", "nodes"):
             if results[key] is not None:
                 state[key] = results[key]
@@ -247,8 +268,12 @@ def collect_once(pool):
 
         state["ts"] = time.time()
         state["errors"] = errors
-        state["phase"] = classify(state["queue"], state["hpa"],
-                                  state["deployment"], state["pods"])
+        # Derive age from the sample's own timestamp every tick, so a failing
+        # fetch shows as an ageing number instead of a frozen one.
+        state["queue_age"] = (int(state["ts"] - state["queue_stamp"])
+                              if state["queue_stamp"] else None)
+        state["phase"] = classify(state["queue"], state["queue_age"],
+                                  state["hpa"], state["deployment"], state["pods"])
 
         history.append({
             "t": round(state["ts"], 1),

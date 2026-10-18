@@ -10,7 +10,7 @@ spec:
     name: ${DEPLOYMENT}
   # The whole point: 0 is a legal replica count on GKE 1.37+.
   minReplicas: 0
-  maxReplicas: 10
+  maxReplicas: 100
   metrics:
   # External/Object metrics only -- CPU and memory cannot be read from a
   # workload that has no Pods, so they can never scale it off zero.

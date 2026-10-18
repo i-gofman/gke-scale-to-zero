@@ -473,9 +473,14 @@ function render(data) {
     (s.queue_age != null ? ` · metric sampled ${s.queue_age}s ago` : "");
 
   // tiles
+  const stale = s.queue_age != null && s.queue_age > 180;
   $("t-queue").textContent = s.queue == null ? "—" : s.queue.toLocaleString();
+  $("t-queue").style.color = stale ? css("--text-muted") : "";
   $("t-queue-n").textContent = s.queue_age == null
-    ? "undelivered messages" : `undelivered · ${s.queue_age}s old`;
+    ? "undelivered messages"
+    : stale ? `⚠ stale — last sample ${s.queue_age}s ago`
+            : `undelivered · ${s.queue_age}s old`;
+  $("t-queue-n").style.color = stale ? css("--warning") : "";
   $("t-reps").textContent = `${s.deployment.ready ?? 0} / ${s.hpa.desiredReplicas ?? 0}`;
   $("t-reps-n").textContent = `ready / desired · ${reps} scheduled`;
   $("t-nodes").textContent = s.nodes.total ?? "—";
